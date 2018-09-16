@@ -1,0 +1,9 @@
+[package]
+name = "rebound"
+version = "0.1.0"
+authors = ["Ryan Goldstein <ryanisaacg@gmail.com>"]
+
+[dependencies]
+nalgebra = "*"
+ncollide2d = "*"
+quicksilver = "0.3.0"
