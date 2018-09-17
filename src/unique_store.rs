@@ -41,19 +41,10 @@ impl KeyAllocator {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Key {
     generation: u32,
     index: u32,
-}
-
-impl Key {
-    pub fn null() -> Key {
-        Key {
-            generation: 0,
-            index: 0,
-        }
-    }
 }
 
 pub struct UniqueStore<T: Copy> {

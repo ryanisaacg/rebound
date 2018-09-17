@@ -25,7 +25,7 @@ const PLAYER_SIZE: Vector = Vector {
     y: 0.16,
 };
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 enum CollisionProp {
     Terrain,
     Entity(Key),
@@ -48,13 +48,12 @@ struct Store {
     friction: UniqueStore<f32>, // the fraction of the velocity to retain frame-over-frame
     embed: UniqueStore<Vector>, // the vector sum required to move the character out of all overlapping terrain
     velocity_cap: UniqueStore<Vector>,
-    player: Key,
 }
 
 impl Store {
     fn new() -> Store {
-        let mut state = Store {
-            world: CollisionWorld::new(0.02),
+        Store {
+            world: CollisionWorld::new(0.002),
             key_alloc: KeyAllocator::new(),
             bounds: UniqueStore::new(),
             types: UniqueStore::new(),
@@ -63,24 +62,11 @@ impl Store {
             friction: UniqueStore::new(),
             embed: UniqueStore::new(),
             velocity_cap: UniqueStore::new(),
-            player: Key::null(),
-        };
-        state.player = state.add_physical((0, 0), 0, Cuboid::new((PLAYER_SIZE / 2).into_vector()), true, Player);
-        state.friction[state.player] = 0.9;
-        state.velocity_cap.insert(state.player, Vector::new(0.06, 0.15));
-        state
+        }
     }
 
-    fn add_physical(&mut self, pos: impl Into<Vector>, angle: impl Scalar, bounds: impl Shape<f32>, solid: bool, entity_type: EntityType) -> Key {
+    fn create_physical_entity(&mut self, entity_type: EntityType) -> Key {
         let key = self.key_alloc.alloc();
-        let pos: Vector = pos.into();
-        let bounds = ShapeHandle::new(bounds);
-        let query_type = match solid {
-            true => GeometricQueryType::Contacts(0.02, 0.02),
-            false => GeometricQueryType::Proximity(0.02),
-        };
-        let isometry = na::Isometry2::new(pos.into_vector(), angle.float());
-        self.bounds.insert(key, self.world.add(isometry, bounds, CollisionGroups::new(), query_type, CollisionProp::Entity(key)));
         self.types.insert(key, entity_type);
         self.velocity.insert(key, Vector::ZERO);
         self.acceleration.insert(key, Vector::ZERO);
@@ -88,28 +74,59 @@ impl Store {
         self.embed.insert(key, Vector::ZERO);
         key
     }
+
+    fn create_collision_object(&mut self, pos: impl Into<Vector>, angle: impl Scalar, bounds: impl Shape<f32>, solid: bool, prop: CollisionProp) -> CollisionObjectHandle {
+        let pos: Vector = pos.into();
+        let bounds = ShapeHandle::new(bounds);
+        let query_type = match solid {
+            true => GeometricQueryType::Contacts(0.002, 0.002),
+            false => GeometricQueryType::Proximity(0.002),
+        };
+        let isometry = na::Isometry2::new(pos.into_vector(), angle.float());
+        self.world.add(isometry, bounds, CollisionGroups::new(), query_type, prop)
+    }
 }
+
 
 struct Game {
     store: Store,
+    player: Key,
+    wall: Key,
 }
 
 impl State for Game {
     fn new() -> Result<Game> {
+        let mut store = Store::new();
+        let player = store.create_physical_entity(Player);
+        let player_obj = store.create_collision_object((0, 0), 0, Cuboid::new((PLAYER_SIZE / 2).into_vector()), true, CollisionProp::Entity(player));
+        store.bounds.insert(player, player_obj);
+        store.friction[player] = 0.9;
+        store.velocity_cap.insert(player, Vector::new(0.06, 0.15));
+        let wall = store.create_physical_entity(Player);
+        let wall_obj = store.create_collision_object((0.2, 0), 0, Cuboid::new((PLAYER_SIZE / 2).into_vector()), true, CollisionProp::Entity(wall));
+        store.bounds.insert(wall, wall_obj);
         Ok(Game {
-            store: Store::new()
+            store,
+            player,
+            wall
         })
     }
 
     fn update(&mut self, window: &mut Window) -> Result<()> {
         let store = &mut self.store;
         // INPUT
-        store.acceleration[store.player] = Vector::ZERO;
+        store.acceleration[self.player] = Vector::ZERO;
         if window.keyboard()[KeyboardKey::D].is_down() {
-            store.acceleration[store.player].x += 0.003;
+            store.acceleration[self.player].x += 0.003;
         }
         if window.keyboard()[KeyboardKey::A].is_down() {
-            store.acceleration[store.player].x -= 0.003;
+            store.acceleration[self.player].x -= 0.003;
+        }
+        if window.keyboard()[KeyboardKey::Space] == ButtonState::Pressed {
+            let a = store.bounds[self.player];
+            let b = store.bounds[self.wall];
+            let contact = store.world.contact_pair(a, b);
+            println!("{:?}", contact.is_some());
         }
         // PHYSICS
         let world = &mut store.world;
@@ -130,6 +147,7 @@ impl State for Game {
                     let obj_b = world.collision_object(*handle_b).unwrap();
                     match (obj_a.data(), obj_b.data()) {
                         (CollisionProp::Entity(key), CollisionProp::Terrain) => {
+                            println!("{:?}", key);
                             // TODO: handle entity - terrain collisions
                         }
                         _ => ()
