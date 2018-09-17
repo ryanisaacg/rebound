@@ -94,6 +94,21 @@ impl State for Game {
             let transform = na::Isometry2::new((position + Vector::new(0.01, 0.01)).into_vector(), 0.0);
             object.set_position(transform);
         });
+        world.update();
+        for event in world.contact_events() {
+            match event {
+                ContactEvent::Started((handle_a, handle_b)) => {
+                    let obj_a = world.collision_object_mut(*handle_a).unwrap();
+                    let obj_b = world.collision_object_mut(*handle_b).unwrap();
+                    match (obj_a.data(), obj_b.data()) {
+                        (CollisionProp::Entity(key), CollisionProp::Terrain) => {
+                            // TODO: handle entity - terrain collisions
+                        }
+                    }
+                }
+                _ => ()
+            }
+        }
         Ok(())
     }
 
