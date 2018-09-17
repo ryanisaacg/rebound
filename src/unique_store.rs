@@ -144,19 +144,19 @@ fn convert_iter<T>(x: impl Iterator<Item = (usize, (u32, T))>) -> impl Iterator<
     })
 }
 
-pub fn from<T: Copy, U: Copy>(a: impl Iterator<Item = (Key, T)>, b: impl Iterator<Item = (Key, U)>) -> impl Iterator<Item = (Key, (T, U))> {
+pub fn join_key<T, U>(a: impl Iterator<Item = (Key, T)>, b: impl Iterator<Item = (Key, U)>) -> impl Iterator<Item = (Key, (T, U))> {
     Joined {
         a: a.peekable(),
         b: b.peekable()
     }
 }
 
-struct Joined<T: Copy, U: Copy, A: Iterator<Item = (Key, T)>, B: Iterator<Item = (Key, U)>> {
+struct Joined<T, U, A: Iterator<Item = (Key, T)>, B: Iterator<Item = (Key, U)>> {
     a: Peekable<A>,
     b: Peekable<B>,
 }
 
-impl<T: Copy, U: Copy, A: Iterator<Item = (Key, T)>, B: Iterator<Item = (Key, U)>> Iterator for Joined<T, U, A, B> {
+impl<T, U, A: Iterator<Item = (Key, T)>, B: Iterator<Item = (Key, U)>> Iterator for Joined<T, U, A, B> {
     type Item = (Key, (T, U));
 
     fn next(&mut self) -> Option<Self::Item> {
