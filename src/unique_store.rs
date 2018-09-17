@@ -1,3 +1,5 @@
+use std::iter::Peekable;
+
 pub struct KeyAllocator {
     // Gaps are keys within the array that have been freed
     // They can be used to construct a new valid unique key
@@ -36,7 +38,7 @@ impl KeyAllocator {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct Key {
     generation: u32,
     index: u32,
@@ -100,21 +102,60 @@ impl<T: Copy> UniqueStore<T> {
         self.buffer[key.index as usize].0 = 0;
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
-        self.buffer
+    pub fn iter(&self) -> impl Iterator<Item = (Key, &T)> {
+        convert_iter(self.buffer
             .iter()
-            .filter_map(|(generation, value)| match generation {
-                0 => None,
-                _ => Some(value)
-            })
+            .map(|(generation, value)| (*generation, value))
+            .enumerate())
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
-        self.buffer
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (Key, &mut T)> {
+        convert_iter(self.buffer
             .iter_mut()
-            .filter_map(|(generation, value)| match generation {
-                0 => None,
-                _ => Some(value)
-            })
+            .map(|(generation, value)| (*generation, value))
+            .enumerate())
+    }
+}
+
+fn convert_iter<T>(x: impl Iterator<Item = (usize, (u32, T))>) -> impl Iterator<Item = (Key, T)> {
+    x.filter_map(|(index, (generation, value))| match generation {
+        0 => None,
+        _ => Some((Key {
+            generation,
+            index: index as u32
+        }, value))
+    })
+}
+
+pub fn from<T: Copy, U: Copy>(a: impl Iterator<Item = (Key, T)>, b: impl Iterator<Item = (Key, U)>) -> impl Iterator<Item = (Key, (T, U))> {
+    Joined {
+        a: a.peekable(),
+        b: b.peekable()
+    }
+}
+
+struct Joined<T: Copy, U: Copy, A: Iterator<Item = (Key, T)>, B: Iterator<Item = (Key, U)>> {
+    a: Peekable<A>,
+    b: Peekable<B>,
+}
+
+impl<T: Copy, U: Copy, A: Iterator<Item = (Key, T)>, B: Iterator<Item = (Key, U)>> Iterator for Joined<T, U, A, B> {
+    type Item = (Key, (T, U));
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.a.peek().is_some() && self.b.peek().is_some() {
+            let a_key = self.a.peek().unwrap().0;
+            let b_key = self.b.peek().unwrap().0;
+            if a_key == b_key {
+                let (_, a) = self.a.next().unwrap();
+                let (key, b) = self.b.next().unwrap();
+                return Some((key, (a, b)));
+            } else if a_key.index < b_key.index {
+                self.a.next();
+            } else {
+                self.b.next();
+            }
+        }
+        None
     }
 }
