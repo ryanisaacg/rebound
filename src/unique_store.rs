@@ -1,4 +1,7 @@
-use std::iter::Peekable;
+use std::{
+    ops::{Index, IndexMut},
+    iter::Peekable
+};
 
 pub struct KeyAllocator {
     // Gaps are keys within the array that have been freed
@@ -114,6 +117,20 @@ impl<T: Copy> UniqueStore<T> {
             .iter_mut()
             .map(|(generation, value)| (*generation, value))
             .enumerate())
+    }
+}
+
+impl<T: Copy> Index<Key> for UniqueStore<T> {
+    type Output = T;
+
+    fn index(&self, key: Key) -> &T {
+        self.get(key).unwrap()
+    }
+}
+
+impl<T: Copy> IndexMut<Key> for UniqueStore<T> {
+    fn index_mut(&mut self, key: Key) -> &mut T {
+        self.get_mut(key).unwrap()
     }
 }
 
