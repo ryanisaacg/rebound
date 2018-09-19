@@ -4,6 +4,7 @@ extern crate quicksilver;
 
 use ncollide2d::{
     events::ContactEvent,
+    query::Contact,
     shape::{Cuboid, Shape, ShapeHandle},
     world::{CollisionGroups, CollisionObject, CollisionObjectHandle, CollisionWorld, GeometricQueryType}
 };
@@ -46,7 +47,7 @@ struct Store {
     velocity: UniqueStore<Vector>,
     acceleration: UniqueStore<Vector>,
     friction: UniqueStore<f32>, // the fraction of the velocity to retain frame-over-frame
-    embed: UniqueStore<Vector>, // the vector sum required to move the character out of all overlapping terrain
+    embed: UniqueStore<Vector>, // the vector sum of the character's embed into a wall
     velocity_cap: UniqueStore<Vector>,
 }
 
@@ -103,7 +104,7 @@ impl State for Game {
         store.friction[player] = 0.9;
         store.velocity_cap.insert(player, Vector::new(0.06, 0.15));
         let wall = store.create_physical_entity(Player);
-        let wall_obj = store.create_collision_object((0.2, 0), 0, Cuboid::new((PLAYER_SIZE / 2).into_vector()), true, CollisionProp::Entity(wall));
+        let wall_obj = store.create_collision_object((0.4, 0), 0, Cuboid::new((PLAYER_SIZE / 2).into_vector()), true, CollisionProp::Terrain);
         store.bounds.insert(wall, wall_obj);
         Ok(Game {
             store,
@@ -137,50 +138,68 @@ impl State for Game {
         join_key(store.velocity.iter_mut(), store.velocity_cap.iter())
             .for_each(|(_, (velocity, velocity_cap))| *velocity = velocity.clamp(-*velocity_cap, *velocity_cap));
         join_key(store.bounds.iter(), store.velocity.iter())
-            .for_each(|(_, (bounds, velocity))| translate_obj(world.collision_object_mut(*bounds).unwrap(), *velocity));
+            .for_each(|(_, (bounds, velocity))| obj_translate(world, *bounds, *velocity));
         store.embed.iter_mut().for_each(|(_, embed)| *embed = Vector::ZERO);
         world.update();
-        for event in world.contact_events() {
-            match event {
-                ContactEvent::Started(handle_a, handle_b) => {
-                    let obj_a = world.collision_object(*handle_a).unwrap();
-                    let obj_b = world.collision_object(*handle_b).unwrap();
-                    match (obj_a.data(), obj_b.data()) {
-                        (CollisionProp::Entity(key), CollisionProp::Terrain) => {
-                            println!("{:?}", key);
-                            // TODO: handle entity - terrain collisions
+        // COLLISIONS
+        {
+            let mut contacts = Vec::new();
+            for event in world.contact_events() {
+                match event {
+                    ContactEvent::Started(handle_a, handle_b) => {
+                        let obj_a = world.collision_object(*handle_a).unwrap();
+                        let obj_b = world.collision_object(*handle_b).unwrap();
+                        match (obj_a.data(), obj_b.data()) {
+                            (CollisionProp::Entity(key), CollisionProp::Terrain) | (CollisionProp::Terrain, CollisionProp::Entity(key)) => {
+                                if let Some(embed) = store.embed.get_mut(*key) {
+                                    world.contact_pair(*handle_a, *handle_b).unwrap().contacts(&mut contacts);
+                                    for manifold in contacts.drain(..) {
+                                        for contact in manifold.contacts() {
+                                            let Contact { normal, depth, .. } = contact.contact;
+                                            let normal: Vector = normal.unwrap().into();
+                                            let penetration = normal * depth;
+                                            println!("Penetration: {}", penetration);
+                                            *embed += penetration;
+                                            println!("Embed: {}", *embed);
+                                            println!("Key: {:?}", *key);
+                                        }
+                                    }
+                                }
+                            }
+                            _ => ()
                         }
-                        _ => ()
                     }
+                    _ => ()
                 }
-                _ => ()
             }
         }
-        join_key(store.bounds.iter_mut(), store.embed.iter_mut())
-            .for_each(|(_, (bounds, embed))| translate_obj(world.collision_object_mut(*bounds).unwrap(), *embed));
+        join_key(store.bounds.iter_mut(), store.embed.iter())
+            .for_each(|(_, (bounds, embed))| obj_translate(world, *bounds, -*embed * 2));
         Ok(())
     }
 
     fn draw(&mut self, window: &mut Window) -> Result<()> {
         use Background::*;
         window.clear(Color::BLACK)?;
+        let world = &self.store.world;
         join_key(self.store.bounds.iter(), self.store.types.iter()).for_each(|(_, (bounds, ent_type))| {
             let color = match ent_type {
                 Player => Color::BLUE,
             };
-            let object = self.store.world.collision_object(*bounds).unwrap();
-            let position: Vector = object.position().translation.vector.into();
-            let area = Rectangle::new_sized((32, 32)).translate(position * PIXELS_PER_UNIT);
+            let area = Rectangle::new_sized((32, 32)).translate(obj_position(world, *bounds) * PIXELS_PER_UNIT);
             window.draw(&area, Col(color));
         });
         Ok(())
     }
 }
 
-fn translate_obj(object: &mut CollisionObject<f32, CollisionProp>, amount: Vector) {
-    let position: Vector = object.position().translation.vector.into();
-    let transform = na::Isometry2::new((position + amount).into_vector(), 0.0);
-    object.set_position(transform);
+fn obj_translate(world: &mut CollisionWorld<f32, CollisionProp>, object: CollisionObjectHandle, amount: Vector) {
+    let transform = na::Isometry2::new((obj_position(world, object) + amount).into_vector(), 0.0);
+    world.set_position(object, transform);
+}
+
+fn obj_position(world: &CollisionWorld<f32, CollisionProp>, object: CollisionObjectHandle) -> Vector {
+    world.collision_object(object).unwrap().position().translation.vector.into()
 }
 
 fn main() {
