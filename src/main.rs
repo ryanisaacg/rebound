@@ -106,6 +106,9 @@ impl State for Game {
         let wall = store.create_physical_entity(Player);
         let wall_obj = store.create_collision_object((0.4, 0), 0, Cuboid::new((PLAYER_SIZE / 2).into_vector()), true, CollisionProp::Terrain);
         store.bounds.insert(wall, wall_obj);
+        let wall = store.create_physical_entity(Player);
+        let wall_obj = store.create_collision_object((0, 1), 0, Cuboid::new((PLAYER_SIZE / 2).into_vector()), true, CollisionProp::Terrain);
+        store.bounds.insert(wall, wall_obj);
         Ok(Game {
             store,
             player,
@@ -116,7 +119,8 @@ impl State for Game {
     fn update(&mut self, window: &mut Window) -> Result<()> {
         let store = &mut self.store;
         // INPUT
-        store.acceleration[self.player] = Vector::ZERO;
+        store.acceleration[self.player].x = 0.0;
+        store.acceleration[self.player].y = 0.003;
         if window.keyboard()[KeyboardKey::D].is_down() {
             store.acceleration[self.player].x += 0.003;
         }
@@ -141,40 +145,69 @@ impl State for Game {
             .for_each(|(_, (bounds, velocity))| obj_translate(world, *bounds, *velocity));
         store.embed.iter_mut().for_each(|(_, embed)| *embed = Vector::ZERO);
         world.update();
-        // COLLISIONS
         {
             let mut contacts = Vec::new();
-            for event in world.contact_events() {
-                match event {
-                    ContactEvent::Started(handle_a, handle_b) => {
-                        let obj_a = world.collision_object(*handle_a).unwrap();
-                        let obj_b = world.collision_object(*handle_b).unwrap();
-                        match (obj_a.data(), obj_b.data()) {
-                            (CollisionProp::Entity(key), CollisionProp::Terrain) | (CollisionProp::Terrain, CollisionProp::Entity(key)) => {
-                                if let Some(embed) = store.embed.get_mut(*key) {
-                                    world.contact_pair(*handle_a, *handle_b).unwrap().contacts(&mut contacts);
-                                    for manifold in contacts.drain(..) {
-                                        for contact in manifold.contacts() {
-                                            let Contact { normal, depth, .. } = contact.contact;
-                                            let normal: Vector = normal.unwrap().into();
-                                            let penetration = normal * depth;
-                                            println!("Penetration: {}", penetration);
-                                            *embed += penetration;
-                                            println!("Embed: {}", *embed);
-                                            println!("Key: {:?}", *key);
-                                        }
-                                    }
+            let embed = &mut store.embed;
+            let bounds = &store.bounds;
+            for (key_a, handle_a) in bounds.iter() {
+                for (_, handle_b) in bounds.iter() {
+                    println!("{:?} {:?}", handle_a, handle_b);
+                    let obj_a = world.collision_object(*handle_a).unwrap();
+                    let obj_b = world.collision_object(*handle_b).unwrap();
+                    if let (CollisionProp::Entity(_), CollisionProp::Terrain, Some(embed)) = (obj_a.data(), obj_b.data(), embed.get_mut(key_a)) {
+                        if let Some(pair) = world.contact_pair(*handle_a, *handle_b) {
+                            pair.contacts(&mut contacts);
+                            for manifold in contacts.drain(..) {
+                                for contact in manifold.contacts() {
+                                    let Contact { normal, depth, .. } = contact.contact;
+                                    let normal: Vector = normal.unwrap().into();
+                                    let penetration = normal * depth;
+                                    println!("Penetration: {}", penetration);
+                                    *embed += penetration;
+                                    println!("Embed: {}", *embed);
                                 }
                             }
-                            _ => ()
                         }
                     }
-                    _ => ()
+
                 }
             }
         }
+        // COLLISIONS
+//        {
+//            let mut contacts = Vec::new();
+//            for event in world.contact_events() {
+//                match event {
+//                    ContactEvent::Started(handle_a, handle_b) => {
+//                        let obj_a = world.collision_object(*handle_a).unwrap();
+//                        let obj_b = world.collision_object(*handle_b).unwrap();
+//                        match (obj_a.data(), obj_b.data()) {
+//                            (CollisionProp::Entity(key), CollisionProp::Terrain) | (CollisionProp::Terrain, CollisionProp::Entity(key)) => {
+//                                if let Some(embed) = store.embed.get_mut(*key) {
+//                                    world.contact_pair(*handle_a, *handle_b).unwrap().contacts(&mut contacts);
+//                                    for manifold in contacts.drain(..) {
+//                                        for contact in manifold.contacts() {
+//                                            let Contact { normal, depth, .. } = contact.contact;
+//                                            let normal: Vector = normal.unwrap().into();
+//                                            let penetration = normal * depth;
+//                                            println!("Penetration: {}", penetration);
+//                                            *embed += penetration;
+//                                            println!("Embed: {}", *embed);
+//                                            println!("Key: {:?}", *key);
+//                                        }
+//                                    }
+//                                }
+//                            }
+//                            _ => ()
+//                        }
+//                    }
+//                    _ => ()
+//                }
+//            }
+//        }
         join_key(store.bounds.iter_mut(), store.embed.iter())
-            .for_each(|(_, (bounds, embed))| obj_translate(world, *bounds, -*embed * 2));
+            .for_each(|(_, (bounds, embed))| obj_translate(world, *bounds, -*embed));
+        world.update();
         Ok(())
     }
 
